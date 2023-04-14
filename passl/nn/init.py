@@ -31,7 +31,6 @@ def ones_(x):
 def constant_(x, value):
     return x.fill_(value)
 
-
 @paddle.no_grad()
 def normal_(x, mean=0., std=1.):
     temp_value = paddle.tensor.random.gaussian(
@@ -47,6 +46,11 @@ def uniform_(x, a=0., b=1.):
     x.copy_(temp_value, False)
     return x
 
+def constant_init(layer, val, bias=0):
+    if hasattr(layer, 'weight') and layer.weight is not None:
+        constant_(layer.weight, val)
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        constant_(layer.bias, bias)
 
 def _calculate_fan_in_and_fan_out(tensor):
     dimensions = tensor.dim()
@@ -132,6 +136,24 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     normal_(tensor, 0, std)
 
 
+def kaiming_init(layer,
+                 a=0,
+                 mode='fan_out',
+                 nonlinearity='relu',
+                 bias=0,
+                 distribution='normal'):
+    assert distribution in ['uniform', 'normal']
+    if distribution == 'uniform':
+        kaiming_uniform_(layer.weight,
+                         a=a,
+                         mode=mode,
+                         nonlinearity=nonlinearity)
+    else:
+        kaiming_normal_(layer.weight, a=a, mode=mode, nonlinearity=nonlinearity)
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        constant_(layer.bias, bias)
+
+
 @paddle.no_grad()
 def xavier_uniform_(tensor, gain=1.):
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
@@ -147,6 +169,14 @@ def xavier_normal_(tensor, gain=1.):
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     return normal_(tensor, 0., std)
 
+def xavier_init(layer, gain=1, bias=0, distribution='normal'):
+    assert distribution in ['uniform', 'normal']
+    if distribution == 'uniform':
+        xavier_uniform_(layer.weight, gain=gain)
+    else:
+        xavier_normal_(layer.weight, gain=gain)
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        constant_(layer.bias, bias)
 
 @paddle.no_grad()
 def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):

@@ -87,6 +87,7 @@ class Engine(object):
                 """ set seed in subproces for dataloader when num_workers > 0"""
                 np.random.seed(seed + worker_id)
                 random.seed(seed + worker_id)
+                paddle.seed(seed + worker_id)
 
         RELATED_FLAGS_SETTING = {}
         RELATED_FLAGS_SETTING['FLAGS_cudnn_exhaustive_search'] = 1
@@ -195,6 +196,8 @@ class Engine(object):
 
         # build model
         self.model = build_model(self.config["Model"])
+        sdic = paddle.load("simsiam_model.pd")
+        self.model.set_state_dict(sdic)
 
         n_parameters = sum(p.numel() for p in self.model.parameters()
                            if not p.stop_gradient).item()

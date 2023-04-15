@@ -18,12 +18,6 @@ Global:
   use_visualdl: False
   seed: 2023
 
-# FP16 setting
-FP16:
-  level: O1
-  GradScaler:
-    init_loss_scaling: 65536.0
-    incr_every_n_steps: 2000
 
 DistributedStrategy:
   data_parallel: True
@@ -100,8 +94,8 @@ DataLoader:
     sampler:
       name: DistributedBatchSampler
       batch_size: 64
-      drop_last: True
-      shuffle: False
+      drop_last: False
+      shuffle: True
     loader:
-      num_workers: 0
+      num_workers: 8
       use_shared_memory: True

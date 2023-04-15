@@ -198,8 +198,6 @@ class Engine(object):
 
         # build model
         self.model = build_model(self.config["Model"])
-        sdic = paddle.load("simsiam_model.pd")
-        self.model.set_state_dict(sdic)
 
         n_parameters = sum(p.numel() for p in self.model.parameters()
                            if not p.stop_gradient).item()

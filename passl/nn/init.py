@@ -46,11 +46,22 @@ def uniform_(x, a=0., b=1.):
     x.copy_(temp_value, False)
     return x
 
+
 def constant_init(layer, val, bias=0):
     if hasattr(layer, 'weight') and layer.weight is not None:
         constant_(layer.weight, val)
     if hasattr(layer, 'bias') and layer.bias is not None:
         constant_(layer.bias, bias)
+
+
+def normal_init(layer, mean=0, std=1, bias=0):
+    if hasattr(layer, 'weight') and layer.weight is not None:
+        normal_(layer.weight, mean, std)
+    else:
+        normal_(layer, mean, std)
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        constant_(layer.bias, bias)
+
 
 def _calculate_fan_in_and_fan_out(tensor):
     dimensions = tensor.dim()

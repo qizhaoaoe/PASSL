@@ -17,7 +17,7 @@ import paddle
 import paddle.nn as nn
 from passl.models import Model
 from passl.models import ResNet
-from passl.nn.init import xavier_init, constant_
+from passl.nn.init import xavier_init, constant_, normal_init
 
 
 class NonLinearNeckV2(nn.Layer):
@@ -179,14 +179,32 @@ class SimSiam(Model):
             paddle.save(self.state_dict(), path + ".pdparams")
 
 
-# if __name__ == '__main__':
-#     seed = 2023
-#     import numpy as np
-#     np.random.seed(seed)
-#     paddle.seed(seed)
-#     model = SimSiam()
-#     paddle.save(model.state_dict(), "ss_model.pd")
-#     np.save("fc0_weight.npy", model.encoder.fc[0].weight.cpu().numpy())
-#     data0 = paddle.to_tensor(np.random.random([1,3,224,224]).astype(np.float32)).cuda()
-#     data1 = paddle.to_tensor(np.random.random([1,3,224,224]).astype(np.float32)).cuda()
-#     out = model([data0, data1])
+class SimSiamLinearClassifer(Model):
+    def __init__(self, depth, frozen_stages, with_avg_pool=False, in_channels=2048, num_classes=1000):
+        super(SimSiamLinearClassifer, self).__init__()
+        self.with_avg_pool = with_avg_pool
+        self.backbone = ResNet(depth=depth, frozen_stages=frozen_stages)
+        if self.with_avg_pool:
+            self.avg_pool = nn.AdaptiveAvgPool2D((1, 1))
+        self.fc_cls = nn.Linear(in_channels, num_classes)
+        normal_init(self.fc_cls, mean=0.0, std=0.01, bias=0.0)
+
+    def forward(self, x):
+        x = self.backbone(x)
+        if self.with_avg_pool:
+            x = self.avg_pool(x)
+        x = paddle.reshape(x, [-1, self.in_channels])
+        cls_score = self.fc_cls(x)
+        return cls_score
+
+
+def simsiam_lp():
+    # linear probability
+    model = SimSiamLinearClassifer(
+        depth=50,
+        frozen_stages=4,
+        with_avg_pool=True,
+        in_channels=2048,
+        num_classes=1000
+    )
+    return model

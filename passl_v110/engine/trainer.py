@@ -289,18 +289,22 @@ class Trainer:
         self.model.train()
         iter_loader = IterLoader(self.train_dataloader, self.current_epoch)
         self.call_hook('run_begin')
-
+        self.total_iters = 10
         while self.current_iter < (self.total_iters):
             if self.current_iter % self.iters_per_epoch == 0:
                 self.call_hook('train_epoch_begin')
             self.inner_iter = self.current_iter % self.iters_per_epoch
             self.current_iter += 1
             self.current_epoch = iter_loader.epoch
-
+            if hasattr(self.train_dataloader.batch_sampler, "set_epoch"):
+                self.train_dataloader.batch_sampler.set_epoch(self.current_epoch)
             data = next(iter_loader)
 
             self.call_hook('train_iter_begin')
-
+            print('params:=======   ')
+            for name, param in self.model.named_parameters():
+                print(name, 'params:', param.detach().sum().cpu().numpy())
+            print('=============')
             if self.use_amp:
                 with paddle.amp.auto_cast(**self.auto_cast):
                     if self.use_byol_iters:
@@ -368,7 +372,7 @@ class Trainer:
             else:
                 raise TypeError('unknown type of data')
 
-            labels = data[-1]
+            labels = data[-1].cuda()
             if self.use_amp:
                 with paddle.amp.auto_cast(**self.auto_cast):
                     pred = model(*data, mode='test')

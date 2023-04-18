@@ -92,8 +92,8 @@ class LogHook(Hook):
             log_items.append(val)
 
         log_str += ', '.join(log_items)
-
-        trainer.logger.info(log_str)
+        print(log_str)
+        # trainer.logger.info(log_str)
 
     def _round_float(self, items):
         if isinstance(items, list):

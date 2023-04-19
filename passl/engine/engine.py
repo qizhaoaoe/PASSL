@@ -35,7 +35,7 @@ from passl.models import build_model
 from passl.loss import build_loss
 from passl.metric import build_metrics
 from passl.scheduler import build_lr_scheduler
-from passl.optimizer import build_optimizer
+from passl.optimizer import build_optimizer, build_simsiam_optimizer
 from passl.utils import io
 from passl.core import recompute_warp, GradScaler, param_sync
 from passl.models.utils import EMA
@@ -223,8 +223,12 @@ class Engine(object):
                 self.lr_scheduler = build_lr_scheduler(
                     config_lr_scheduler, self.config["Global"]["epochs"],
                     len(self.train_dataloader))
-
-            self.optimizer = build_optimizer(self.config["Optimizer"],
+            if self.config["Model"]["name"] == 'SimSiam':
+                print('simsiam optimizer builder!!!!!!!!!!!')
+                self.optimizer = build_simsiam_optimizer(self.config["Optimizer"],
+                                             self.lr_scheduler, self.model)
+            else:
+                self.optimizer = build_optimizer(self.config["Optimizer"],
                                              self.lr_scheduler, self.model)
 
         # load pretrained model

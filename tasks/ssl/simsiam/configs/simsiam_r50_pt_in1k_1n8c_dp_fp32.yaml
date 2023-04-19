@@ -14,7 +14,7 @@ Global:
   eval_unit: "epoch"
   accum_steps: 1
   epochs: 100
-  print_batch_step: 10
+  print_batch_step: 50
   use_visualdl: False
   seed: 2023
 
@@ -41,6 +41,7 @@ Optimizer:
   weight_decay: 0.0001
   use_master_param: True
   exp_avg_force_fp32: True
+  tensor_fusion: False
 
 # data loader for train and eval
 DataLoader:

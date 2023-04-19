@@ -11,76 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# Ref: https://github.com/facebookresearch/simsiam/blob/main/simsiam/builder.py
 
 import os
 import paddle
 import paddle.nn as nn
 from passl.models import Model
 from passl.models import ResNet
+from passl.models.resnet import BottleneckBlock, BasicBlock
 from passl.nn.init import xavier_init, constant_, normal_init
+import paddle.nn as nn
+from passl.nn import init
 
 
-class NonLinearNeckV2(nn.Layer):
-    """The non-linear neck in MoCo v2: fc-relu-fc.
-    """
-
-    def __init__(self,
-                 in_channels,
-                 hid_channels,
-                 out_channels,
-                 with_bias=True,
-                 with_avg_pool=True):
-        super(NonLinearNeckV2, self).__init__()
-        self.with_avg_pool = with_avg_pool
-        if with_avg_pool:
-            self.avgpool = nn.AdaptiveAvgPool2D((1, 1))
-
-        self.mlp = nn.Sequential(nn.Linear(in_channels, hid_channels, bias_attr=with_bias),
-                                 nn.BatchNorm1D(hid_channels), nn.ReLU(),
-                                 nn.Linear(hid_channels, out_channels))
-
-        # init_backbone_weight(self.mlp)
-        # self.init_parameters()
-
-    def init_parameters(self, init_linear='kaiming'):
-        # _init_parameters(self, init_linear)
-        for m in self.sublayers():
-            if isinstance(m, nn.Linear):
-                xavier_init(m, distribution='uniform')
-            elif isinstance(m, (nn.BatchNorm1D, nn.BatchNorm2D, nn.GroupNorm,
-                                nn.SyncBatchNorm)):
-                if m.weight is not None:
-                    constant_(m.weight, 1)
-                if m.bias is not None:
-                    constant_(m.bias, 0)
-
-    def forward(self, x):
-        if self.with_avg_pool:
-            x = self.avgpool(x)
-        return self.mlp(x.reshape([x.shape[0], -1]))
-
-
-class SimSiamContrastiveHead(nn.Layer):
-    """Head for simsiam contrastive learning."""
-    def __init__(self):
-        super(SimSiamContrastiveHead, self).__init__()
-        self.criterion = nn.CosineSimilarity(axis=1)
-
-    def forward(self, p1, p2, z1, z2):
-        """Forward head.
-
-        Args:
-            p1 (Tensor): output of predictor1.
-            p2 (Tensor): output of predictor2.
-            z1 (Tensor): output of encoder1.
-            z2 (Tensor): output of encoder2.
-
-        Returns:
-            dict[str, Tensor]: A dictionary of loss components.
-        """
-        outputs = dict()
-        outputs['loss'] = -(self.criterion(p1, z2).mean() + self.criterion(p2, z1).mean()) * 0.5
-        return outputs
+__all__ = [
+    'SimSiamLinearProbe',
+    'simsiam_resnet50_linearprobe',
+    'SimSiam',
+]
 
 
 class SimSiam(Model):
@@ -89,7 +37,9 @@ class SimSiam(Model):
     https://arxiv.org/abs/2011.10566
     """
     def __init__(self,
+                 depth=50,
                  dim=2048,
+                 hid_channels=512,
                  use_synch_bn=True
                 ):
         """
@@ -104,10 +54,11 @@ class SimSiam(Model):
         # Create the encoder
         # number classes is the output fc dimension, zero-initialize last BNs
         self.encoder = ResNet(
-            depth=50,
+            block=BottleneckBlock,
+            depth=depth,
             with_pool=True,
-            num_classes=2048,
-            zero_init_residual=True)
+            class_num=dim)
+        
         # build a 3-layer projector
         prev_dim = self.encoder.fc.weight.shape[0]
         self.encoder.fc = nn.Sequential(nn.Linear(prev_dim, prev_dim, bias_attr=False),
@@ -119,20 +70,35 @@ class SimSiam(Model):
                                         self.encoder.fc,
                                         nn.BatchNorm1D(dim, weight_attr=False, bias_attr=False))
         self.encoder.fc[6].bias.stop_gradient = True
-
-        self.predictor = NonLinearNeckV2(
-            in_channels=2048,
-            hid_channels=512,
-            out_channels=2048,
-            with_bias=False,
-            with_avg_pool=False)
-        self.head = SimSiamContrastiveHead()
+        
+        self.predictor = nn.Sequential(nn.Linear(dim, hid_channels, bias_attr=False),
+                                 nn.BatchNorm1D(hid_channels), nn.ReLU(),
+                                 nn.Linear(hid_channels, dim))
+        self.criterion = nn.CosineSimilarity(axis=1)
 
         # Convert BatchNorm*d to SyncBatchNorm*d
         if use_synch_bn:
             self.encoder = nn.SyncBatchNorm.convert_sync_batchnorm(self.encoder)
             self.predictor = nn.SyncBatchNorm.convert_sync_batchnorm(self.predictor)
-
+        # initialize parameters of encoder
+        self.init_parameters()
+        
+    def init_parameters(self):
+        for m in self.encoder.sublayers():
+            if isinstance(m, nn.Conv2D):
+                init.kaiming_init(m, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.layer.norm._BatchNormBase, nn.GroupNorm)):
+                init.constant_init(m, 1)
+        # from torch
+        # Zero-initialize the last BN in each residual branch,
+        # so that the residual branch starts with zeros, and each residual block behaves like an identity.
+        # This improves the model by 0.2~0.3% according to https://arxiv.org/abs/1706.02677
+        for m in self.encoder.sublayers():
+            if isinstance(m, BottleneckBlock):
+                init.constant_init(m.bn3, 0)
+            elif isinstance(m, BasicBlock):
+                init.constant_init(m.bn2, 0)
+                    
     def train_iter(self, inputs):
         x1, x2 = inputs
 
@@ -147,8 +113,8 @@ class SimSiam(Model):
 
         p2 = self.predictor(z2)  # NxC
         # print("encoder p2: ", p2.detach().sum().cpu().numpy())
-
-        outputs = self.head(p1, p2, z1.detach(), z2.detach())
+        outputs = dict()
+        outputs['loss'] = -(self.criterion(p1, z2.detach()).mean() + self.criterion(p2, z1.detach()).mean()) * 0.5
         return outputs
 
     def forward(self, *inputs, mode='train', **kwargs):
@@ -179,32 +145,60 @@ class SimSiam(Model):
             paddle.save(self.state_dict(), path + ".pdparams")
 
 
-class SimSiamLinearClassifer(Model):
-    def __init__(self, depth, frozen_stages, with_avg_pool=False, in_channels=2048, num_classes=1000):
-        super(SimSiamLinearClassifer, self).__init__()
-        self.with_avg_pool = with_avg_pool
-        self.backbone = ResNet(depth=depth, frozen_stages=frozen_stages)
-        if self.with_avg_pool:
-            self.avg_pool = nn.AdaptiveAvgPool2D((1, 1))
-        self.fc_cls = nn.Linear(in_channels, num_classes)
-        normal_init(self.fc_cls, mean=0.0, std=0.01, bias=0.0)
 
-    def forward(self, x):
-        x = self.backbone(x)
-        if self.with_avg_pool:
-            x = self.avg_pool(x)
-        x = paddle.reshape(x, [-1, self.in_channels])
-        cls_score = self.fc_cls(x)
-        return cls_score
+class SimSiamLinearProbe(ResNet, Model):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # freeze all layers but the last fc
+        for name, param in self.named_parameters():
+            if name not in ['fc.weight', 'fc.bias']:
+                param.stop_gradient = True
+
+        # optimize only the linear classifier
+        parameters = list(
+            filter(lambda p: not p.stop_gradient, self.parameters()))
+        assert len(parameters) == 2  # weight, bias
+
+        init.normal_(self.fc.weight, mean=0.0, std=0.01)
+        init.zeros_(self.fc.bias)
+
+        self.apply(self._freeze_norm)
+
+    def _freeze_norm(self, layer):
+        if isinstance(layer, (nn.layer.norm._BatchNormBase)):
+            layer._use_global_stats = True
+    
+    def load_pretrained(self, path, rank=0, finetune=False):
+        # load pretrained model
+        if not os.path.exists(path):
+            raise ValueError("Model pretrain path {} does not "
+                             "exists.".format(path))
+
+        state_dict = self.state_dict()
+        param_state_dict = paddle.load(path)
+        if "state_dict" in param_state_dict:
+            param_state_dict = param_state_dict['state_dict']
+        new_state_dict = {}
+        for key, value in param_state_dict.items():
+            k = key.replace('encoder.', '')
+            if k in state_dict:
+                new_state_dict[k] = param_state_dict[key]
+            else:
+                print(key, ' not in current model')
+        if not finetune:
+            self.set_state_dict(new_state_dict)
 
 
-def simsiam_lp():
-    # linear probability
-    model = SimSiamLinearClassifer(
-        depth=50,
-        frozen_stages=4,
-        with_avg_pool=True,
-        in_channels=2048,
-        num_classes=1000
-    )
+def simsiam_resnet50_linearprobe(**kwargs):
+    model = SimSiamLinearProbe(block=BottleneckBlock, depth=50, **kwargs)
     return model
+
+def simsiam_resnet50_pretrain(**kwargs):
+    model = SimSiam()
+    return model
+
+# if __name__ == '__main__':
+#     model = SimSiam()
+#     for name, param in model.named_parameters():
+#         print(name, param.stop_gradient, param.detach().sum().cpu().numpy())

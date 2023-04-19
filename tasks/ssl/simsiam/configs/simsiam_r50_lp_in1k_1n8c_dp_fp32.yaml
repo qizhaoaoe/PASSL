@@ -14,7 +14,7 @@ Global:
   eval_unit: "epoch"
   accum_steps: 1
   epochs: 90
-  print_batch_step: 10
+  print_batch_step: 50
   use_visualdl: False
   seed: 2023
 
@@ -24,7 +24,7 @@ DistributedStrategy:
 
 # model architecture
 Model:
-  name: simsiam_lp
+  name: simsiam_resnet50_linearprobe
 
 # loss function config for traing/eval process
 Loss:
@@ -46,9 +46,12 @@ LRScheduler:
     last_epoch: 0
 
 Optimizer:
-  name: MomentumLARS
+  name: MomentumLARC
   momentum: 0.9
   weight_decay: 0.0
+  trust_coefficient: 0.001
+  clip: False
+
 
 # data loader for train and eval
 DataLoader:
@@ -80,7 +83,6 @@ DataLoader:
       transform:
         - Resize:
             size: 256
-            backend: pil
         - CenterCrop:
             size: 224
         - ToTensor:
@@ -97,6 +99,9 @@ DataLoader:
       use_shared_memory: True
 
 Metric:
+  Train:
+    - TopkAcc:
+        topk: [1, 5]
   Eval:
     - TopkAcc:
         topk: [1, 5]
